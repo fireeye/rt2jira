@@ -78,3 +78,6 @@ The following are comments on some of the INI settings.
 * Auto-add relevant watchers to the JIRA tickets
 * Any attached files to RT tickets should also be attached to the JIRA ticket
 * When a JIRA ticket is created, figure out some way to reply to the RT thread, indicating that a ticket has been created with the corresponding URL
+* Omit requester name from summary; instead, figure out a way to update the Reporter of the JIRA ticket
+* It would be nice of the ticket summary/description were built from a configurable template (eventually)
+* When multiple RT tickets are submitted with the exact same subject line, treat them as a single JIRA ticket if and only if the RT Ticket IDs are +/- within 10 of each other (for intelligent clustering)

@@ -144,7 +144,8 @@ try:
 
         # Scrub ticket title to remove 're:' and 'fw:' prefixes
         scrubbed_title = re.sub('^(?i)(re|fw|fwd):( |)', '', t['Subject'])
-        ticket_summary = ticket_requester_name + ': ' + scrubbed_title
+        #ticket_summary = ticket_requester_name + ': ' + scrubbed_title
+        ticket_summary = scrubbed_title
         logger.info('Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
         syslog.syslog(syslog.LOG_INFO, 'Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
 
