@@ -35,13 +35,13 @@ This Python script automatically convert RT tickets to JIRA tickets, where the u
 
 2. `api_search_suffix`: Search query to feed into the REST API to pull relevant tickets down to be ported as JIRA tickets.
 
-For example, if this value is set to something like:
-`search/ticket?query=Queue+%3D+%27RT-Queue-Name%27+AND+LastUpdated+%3E+%27-5+days%27&orderby=LastUpdated&format=l`
+    For example, if this value is set to something like:
+    `search/ticket?query=Queue+%3D+%27RT-Queue-Name%27+AND+LastUpdated+%3E+%27-5+days%27&orderby=LastUpdated&format=l`
 
-Then, the script will be making a REST API query that looks something like this:
-`https://rt.server.com/REST/1.0/search/ticket?query=Queue+%3D+%27RT-Queue-Name%27+AND+LastUpdated+%3E+%27-5+days%27&orderby=LastUpdated&format=l`
+    Then, the script will be making a REST API query that looks something like this:
+    `https://rt.server.com/REST/1.0/search/ticket?query=Queue+%3D+%27RT-Queue-Name%27+AND+LastUpdated+%3E+%27-5+days%27&orderby=LastUpdated&format=l`
 
-Where the RT Queue name in this instance is **RT-Queue-Name** and this query polls all RT tickets that were updated in the past **5** days.
+    Where the RT Queue name in this instance is **RT-Queue-Name** and this query polls all RT tickets that were updated in the past **5** days.
 
 3. `url_ticket_display_prefix`: The URL prefix to display RT tickets, given a Ticket ID.
 
