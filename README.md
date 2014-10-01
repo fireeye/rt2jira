@@ -20,12 +20,27 @@ This Python script automatically convert RT tickets to JIRA tickets, where the u
 
 0. Get all prerequisite libraries installed.
 
-1. Download the rt2jira package.
+1. Download and extract the rt2jira package.
 
 2. Edit and review the config.ini file.
 
 3. Run: ``python rt2jira.py``
 
-## config.ini Settings ##
+## config.ini Notes ##
 
+0. Please review all settings in the config.ini file *before* running the script.
+
+[rt]
+
+1. `api_url_prefix`: This is the URL for the RT REST API.  Traditionally, it should look something like `https://rt.server.com/REST/1.0/`
+
+2. `api_search_suffix`: Search query to feed into the REST API to pull relevant tickets down to be ported as JIRA tickets.
+
+For example, if this value is set to something like:
+`search/ticket?query=Queue+%3D+%27RT-Queue-Name%27+AND+LastUpdated+%3E+%27-5+days%27&orderby=LastUpdated&format=l`
+
+Then, the script will be making a REST API query that looks something like this:
+`https://rt.server.com/REST/1.0/search/ticket?query=Queue+%3D+%27RT-Queue-Name%27+AND+LastUpdated+%3E+%27-5+days%27&orderby=LastUpdated&format=l`
+
+Where the RT Queue name in this instance is _RT-Queue-Name_ and this query polls all RT tickets that were updated in the past _5_ days.
 
