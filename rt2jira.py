@@ -16,6 +16,7 @@ import re
 import sys
 import logging
 import ConfigParser
+import syslog
 
 # Initialize RT library logging
 set_logging('error')
@@ -61,14 +62,25 @@ try:
     config.read([config_file])
 except:
     logger.error("Can't parse " + config_file)
+    syslog.syslog(syslog.LOG_ERR, "Can't parse " + config_file)
     sys.exit(1)
 
+# Sanity check
 try:
     if not config.getboolean('sanity', 'reviewed'):
         logger.error('Please review and change the ' + config_file + ' settings before running this script.')
+        syslog.syslog(syslog.LOG_ERR, 'Please review and change the ' + config_file + ' settings before running this script.')
         sys.exit(1)
 except:
     sys.exit(1)
+
+# Check for debug setting.
+try:
+    if not config.getboolean('sanity', 'debug'):
+        logger.setLevel(logging.INFO)
+        ch.setLevel(logging.INFO)
+except:
+    pass
 
 # Initialize or restore RT state settings
 stored_last_updated_activity = time.gmtime(0)
@@ -76,6 +88,7 @@ try:
     stored_last_updated_activity = rt_parse_ticket_time(config.get('rt', 'last_fetched_timestamp'))
 except:
     logger.warn('Unable to parse feed timestamp - Defaulting to: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
+    syslog.syslog(syslog.LOG_WARNING, 'Unable to parse feed timestamp - Defaulting to: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
 
 # Initialize web services
 # Source RT Feed
@@ -86,12 +99,17 @@ try:
     feed = resource.get(path=config.get('rt', 'api_search_suffix'))
 except RTResourceError as e:
     logger.error('Cannot connect to RT server')
+    syslog.syslog(syslog.LOG_ERR, 'Cannot connect to RT server')
     logger.error(e.response.status_int)
+    syslog.syslog(syslog.LOG_ERR, e.response.status_int)
     logger.error(e.response.status)
+    syslog.syslog(syslog.LOG_ERR, e.response.status)
     logger.error(e.response.parsed)
+    syslog.syslog(syslog.LOG_ERR, e.response.parsed)
     sys.exit(1)
 except:
     logger.error('Cannot connect to RT server')
+    syslog.syslog(syslog.LOG_ERR, 'Cannot connect to RT server')
     sys.exit(1)
 
 # Destination JIRA Service
@@ -100,14 +118,18 @@ try:
     jira = JIRA(options={'server': config.get('jira', 'api_url_prefix'), 'verify': config.getboolean('jira', 'verify')}, basic_auth=(config.get('jira', 'username'), config.get('jira', 'password')))
 except JIRAError as e:
     logger.error("Unable to connect to JIRA server.")
+    syslog.syslog(syslog.LOG_ERR, "Unable to connect to JIRA server.")
     logger.error(e.response.parsed)
+    syslog.syslog(syslog.LOG_ERR, e.response.parsed)
     sys.exit(1)
 except:
     logger.error("Unable to connect to JIRA server.")
+    syslog.syslog(syslog.LOG_ERR, "Unable to connect to JIRA server.")
     sys.exit(1)
 
 # Process the most recent activity currently stored.
 logger.info('Starting - Feed Last Updated: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
+syslog.syslog(syslog.LOG_NOTICE, 'Starting - Feed Last Updated: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
 last_updated_activity = stored_last_updated_activity
 
 try:
@@ -124,17 +146,19 @@ try:
         scrubbed_title = re.sub('^(?i)(re|fw|fwd):( |)', '', t['Subject'])
         ticket_summary = ticket_requester_name + ': ' + scrubbed_title
         logger.info('Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
+        syslog.syslog(syslog.LOG_INFO, 'Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
 
         # If stored timestamp is more recent than the comment, then skip processing the comment.
         if stored_last_updated_activity >= ticket_last_updated:
             logger.debug('RT ticket older than stored timestamp, skipping')
+            syslog.syslog(syslog.LOG_DEBUG, 'RT ticket older than stored timestamp, skipping')
             continue
 
         sanitized_summary = re.sub('[^0-9A-Za-z\.\- ]', ' ', ticket_summary)
         sanitized_summary = ' '.join([item.strip() for item in sanitized_summary.split(' ') if len(item) > 3])
         sanitized_summary = re.sub('--', '', sanitized_summary)
-        #sanitized_summary = re.escape(sanitized_summary)
         logger.debug('JQL Search Terms: ' + sanitized_summary)
+        syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
 
         # Check if JIRA ticket already exists.
         jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
@@ -145,11 +169,13 @@ try:
             # If there's at least one match, then use the first one found.
             jira_issue = jira_results[0]
             logger.info('Found existing JIRA ticket (' + jira_issue.key + ')')
+            syslog.syslog(syslog.LOG_INFO, 'Found existing JIRA ticket (' + jira_issue.key + ')')
         else:
             # If there's no match, then create a new JIRA ticket.
             ticket_description = 'Ticket ID: ' + ticket_id + '\n' + config.get('rt', 'url_ticket_display_prefix') + ticket_id + '\nTitle: ' + scrubbed_title + '\nRequester: ' + ticket_requester_name  + '\nCreated Date: ' + rt_format_ticket_time(ticket_date)
             jira_issue = jira.create_issue(project={'key':config.get('jira', 'project')}, summary=ticket_summary, description=ticket_description, issuetype={'name':'Bug'}, components=[{'name':config.get('jira', 'component')}])
             logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
+            syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
 
         # Next, obtain all current comments on the JIRA ticket. 
         jira_comments = jira.comments(jira_issue)
@@ -167,6 +193,7 @@ try:
             # If stored timestamp is more recent than the comment, then skip processing the comment.
             if stored_last_updated_activity >= comment_date:
                 logger.debug('RT comment older than stored timestamp, skipping')
+                syslog.syslog(syslog.LOG_DEBUG, 'RT comment older than stored timestamp, skipping')
                 continue
             elif comment_date > last_updated_activity:
                 # If the comment timestamp is more recent than the current timestamp of most recent activity,
@@ -180,13 +207,16 @@ try:
             comment_exists = False
             for existing_comment in jira_comments:
                 logger.debug('Searching (' + jira_issue.key + ') comment (' + existing_comment.id + ')')
+                syslog.syslog(syslog.LOG_DEBUG, 'Searching (' + jira_issue.key + ') comment (' + existing_comment.id + ')')
                 if comment_uuid in existing_comment.body:
                     comment_exists = True
                     logger.debug('RT comment already exists, skipping')
+                    syslog.syslog(syslog.LOG_DEBUG, 'RT comment already exists, skipping')
                     break
 
             if not comment_exists:
                 logger.info('Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
+                syslog.syslog(syslog.LOG_INFO, 'Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
                 comment_body = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + c['Creator'] + '\nTicket ID: ' + ticket_id + '\nAction: ' + c['Description'] + '\n\n' + c['Content']
 
                 # JIRA can't store comments more than 32,000 chars in length
@@ -196,16 +226,23 @@ try:
 
 except RTResourceError as e:
     logger.error('RT processing error occurred.')
+    syslog.syslog(syslog.LOG_ERR, 'RT processing error occurred.')
     logger.error(e.response.status_int)
+    syslog.syslog(syslog.LOG_ERR, e.response.status_int)
     logger.error(e.response.status)
+    syslog.syslog(syslog.LOG_ERR, e.response.status)
     logger.error(e.response.parsed)
+    syslog.syslog(syslog.LOG_ERR, e.response.parsed)
     sys.exit(1)
 except JIRAError as e:
     logger.error('JIRA processing error occurred.')
+    syslog.syslog(syslog.LOG_ERR, 'JIRA processing error occurred.')
     logger.error(e)
+    syslog.syslog(syslog.LOG_ERR, e)
     sys.exit(1)
 except:
     logger.error('Unknown processing error occurred.')
+    syslog.syslog(syslog.LOG_ERR, 'Unknown processing error occurred.')
     sys.exit(1)
 
 # Update the RT feed timestamp
@@ -215,5 +252,6 @@ try:
         config.write(config_output)
 
     logger.info('Done - Feed Last Updated: ' + config.get('rt', 'last_fetched_timestamp')  + ' UTC')
+    syslog.syslog(syslog.LOG_NOTICE, 'Done - Feed Last Updated: ' + config.get('rt', 'last_fetched_timestamp')  + ' UTC')
 except:
     pass
