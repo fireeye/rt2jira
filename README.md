@@ -51,10 +51,10 @@ The following are comments on some of the INI settings.
 * `url_ticket_display_prefix`: The URL prefix to display RT tickets, given a Ticket ID.
 
     For example if this value is set to something like:
-    `https://rt.server.com/rt/Ticket/Display.html?id=`
+    `https://rt.server.com/Ticket/Display.html?id=`
 
     Then, if the script processes a Ticket ID (42), it will append that number to the end of the URL when creating the corresponding JIRA ticket, like:
-    `https://rt.server.com/rt/Ticket/Display.html?id=42`
+    `https://rt.server.com/Ticket/Display.html?id=42`
 
 * `last_fetched_timestamp`: If running the script for the first time, leave this value blank.  If you want to have the script re-process older RT tickets, you can clear out this value and increase the **5** day value in the search query URI listed in `api_search_suffix`.
 
