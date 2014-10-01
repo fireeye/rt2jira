@@ -72,7 +72,7 @@ The following are comments on some of the INI settings.
 
 ## TODO ##
 
-* -Syslog support-
+* ~~Syslog support~~
 * Create links between related JIRA tickets
 * Advance state tracking (meaning, when an RT ticket is resolved, then the correpsonding JIRA ticket should be resolved)
 * Auto-add relevant watchers to the JIRA tickets
