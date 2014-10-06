@@ -80,4 +80,14 @@ The following are comments on some of the INI settings.
 * When a JIRA ticket is created, figure out some way to reply to the RT thread, indicating that a ticket has been created with the corresponding URL
 * Omit requester name from summary; instead, figure out a way to update the Reporter of the JIRA ticket
 * It would be nice of the ticket summary/description were built from a configurable template (eventually)
-* When multiple RT tickets are submitted with the exact same subject line, treat them as a single JIRA ticket if and only if the RT Ticket IDs are +/- within 10 of each other (for intelligent clustering)
+* ~~When multiple RT tickets are submitted with the exact same subject line, treat them as a single JIRA ticket if and only if the RT Ticket IDs are +/- within 10 of each other (for intelligent clustering)~~
+
+## FAQ ##
+
+1. rt2jira appears to be combining unrelated RT tickets into the same JIRA ticket; how can I fix this?
+
+    Confirm that both RT tickets have an identical Subject.  If that is the case, then adjust the `ticket_id_correlation_range` value by reducing it from 10 to some smaller value -- perhaps 2 or 1.  Keep in mind, that the lower you set this value, the **less** likely the script will correlate/combine any RT tickets in the future.
+
+2. I made a mistake; how do I reset the state of this script?
+
+    Clear out the `last_fetched_timestamp` value so that it is completely empty.  Next, adjust the **5** value in `api_search_suffix` to be a much higher value, in order to go further back in time.  Once fixed, re-run the script and it should start processing much older RT tickets.  If it still isn't going back far enough, increase the **5** value to be even higher.
