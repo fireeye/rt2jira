@@ -58,39 +58,18 @@ def package(r):
 def find_id_range(jira_issue):
     ret = None
     regex = re.compile('Ticket ID: (.*)\n')
-
-    # XXX: Delete this.
-    pp.pprint(jira_issue.fields.description)
     match = regex.search(jira_issue.fields.description)
 
     if match and len(match.groups()) >= 1:
-    
-        # XXX: Delete these.
-        pp.pprint(match.group(0))
-        pp.pprint(match.group(1))
-
         id_list = set([ int(match.group(1).strip()) ])
-        
-        # XXX: Delete this.
-        pp.pprint(id_list)
-
         jira_comments = jira.comments(jira_issue)
-        pp.pprint(jira_comments)
         for comment in jira_comments:
             match = regex.search(comment.body)
             if match and len(match.groups()) >= 1:
-        
-                # XXX: Delete these.
-                pp.pprint(match.group(0))
-                pp.pprint(match.group(1))
-
                 id_list.add(int(match.group(1).strip()))
 
         id_list = list(id_list)
         id_list.sort()
-        
-        # XXX: Delete this.
-        pp.pprint(id_list)
         ret = [ id_list[0], id_list[-1] ]
 
     return ret
@@ -211,19 +190,11 @@ try:
             # Find the first JIRA ticket where the ticket IDs listed in the ticket are within +/- 10 of the RT ticket ID
             for result in jira_results:
                 id_range = find_id_range(result)
-                # XXX: Remove these.
-                pp.pprint('key: ' + result.key)
-                pp.pprint('begin: ' + str(id_range[0]) + ' target: ' + ticket_id + ' end: ' + str(id_range[-1]))
                 original_id = int(ticket_id)
                 id_correlation_range = config.getint('rt', 'ticket_id_correlation_range')
-                pp.pprint(id_correlation_range)
                 if (((id_range[0] - id_correlation_range) <= original_id) and (original_id <= (id_range[-1] + id_correlation_range))):
                     jira_issue = result
                     break
-
-            # XXX: Deprecated code
-            # If there's at least one match, then use the first one found.
-            #jira_issue = jira_results[0]
 
             logger.info('Found existing JIRA ticket (' + jira_issue.key + ')')
             syslog.syslog(syslog.LOG_INFO, 'Found existing JIRA ticket (' + jira_issue.key + ')')
