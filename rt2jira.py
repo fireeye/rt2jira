@@ -24,10 +24,8 @@ rt_logger = logging.getLogger('rtkit')
 
 # Initialize app-level logging
 logger = logging.getLogger('rt2jira')
-#logger.setLevel(logging.INFO)
 logger.setLevel(logging.DEBUG)
 ch = logging.StreamHandler()
-#ch.setLevel(logging.INFO)
 ch.setLevel(logging.DEBUG)
 ch.setFormatter(logging.Formatter('%(asctime)s %(name)s[%(process)s]: [%(levelname)s] - %(message)s', "%b %m %H:%M:%S"))
 logger.addHandler(ch)
@@ -37,18 +35,48 @@ pp = pprint.PrettyPrinter(indent=4)
 
 # Define helper functions
 def rt_format_ticket_time(t):
+    """
+    Given a time struct representing the RT ticket's creation timestamp, this
+    returns a formatted, printable version of this timestamp.
+
+    :param t: the time struct of the RT ticket's creation timestamp 
+    """
     return time.strftime("%a %b %d %H:%M:%S %Y", t)
 
 def rt_parse_ticket_time(t):
+    """
+    Given a string representing the RT ticket's creation timestamp, this
+    returns a parsed time struct version of this timestamp.
+
+    :param t: the string of the RT ticket's creation timestamp 
+    """
     return time.strptime(t, "%a %b %d %H:%M:%S %Y")
 
 def rt_format_comment_time(t):
+    """
+    Given a time struct representing the RT ticket's comment timestamp, this
+    returns a formatted, printable version of this timestamp.
+
+    :param t: the time struct of the RT ticket's comment timestamp 
+    """
     return time.strftime("%a %b %d %H:%M:%S %Y UTC", t)
 
 def rt_parse_comment_time(t):
+    """
+    Given a string representing the RT ticket's comment timestamp, this
+    returns a parsed time struct version of this timestamp.
+
+    :param t: the string of the RT ticket's comment timestamp 
+    """
     return time.strptime(t, "%Y-%m-%d %H:%M:%S")
 
 def package(r):
+    """
+    Given an array of tuples, this function returns a dict of mapped
+    key/value pairs.
+
+    :param r: the array of tuples to process
+    """
     keys, vals = zip(*r)
     k = iter(keys)
     v = iter(vals)
@@ -56,6 +84,14 @@ def package(r):
     return d
 
 def find_id_range(jira_issue):
+    """
+    Given an existing JIRA ticket, search the ticket and extract out
+    all corresponding RT ticket IDs referenced in the description and
+    comments of the JIRA ticket.  Then, return an array indicating
+    the smallest and largest IDs found in this ticket.
+
+    :param jira_issue: the JIRA issue to search
+    """
     ret = None
     regex = re.compile('Ticket ID: (.*)\n')
     match = regex.search(jira_issue.fields.description)
@@ -73,6 +109,96 @@ def find_id_range(jira_issue):
         ret = [ id_list[0], id_list[-1] ]
 
     return ret
+
+def resolve(jira_issue):
+    """
+    Given a JIRA ticket, mark the ticket as resolved.
+
+    :param jira_issue: the specified JIRA ticket
+    """
+    state_name = 'Resolve'
+    state_id = None
+    resolution_name = 'Done'
+    resolution_id = None
+
+    for transition in jira.transitions(issue):
+        if state_name in transition['name']:
+            # XXX: Delete this.
+            pp.pprint(transition['id'])
+            state_id = transition['id']
+            break
+
+    for resolution in jira.resolutions():
+        if resolution_name in resolution.name:
+            # XXX: Delete this.
+            pp.pprint(resolution)
+            resolution_id = resolution.id
+            break
+
+    # XXX: Delete this.
+    pp.pprint('state_id:' + state_id + ' resolution_id:' + resolution_id)
+    jira.transition_issue(jira_issue, state_id, fields={ 'resolution': { 'id': resolution_id }, 'customfield_10902':'None' }, comment='Resolving ticket.')
+
+def reopen(jira_issue):
+    """
+    Given a JIRA ticket, mark the ticket as reopened.
+
+    :param jira_issue: the specified JIRA ticket
+    """
+    state_name = 'Reopen Issue'
+    state_id = None
+
+    for transition in jira.transitions(issue):
+        if state_name in transition['name']:
+            # XXX: Delete this.
+            pp.pprint(transition['id'])
+            state_id = transition['id']
+            break
+
+    # XXX: Delete this.
+    pp.pprint('state_id:' + state_id)
+    jira.transition_issue(jira_issue, state_id, comment='Reopening ticket.')
+
+def find_user(rt_username, algo_type, jira_issue):
+    """
+    Given an RT username, returns the corresponding JIRA username that best
+    matches this user.  Two different algorithms are provided:
+
+    0 - straight search in JIRA using the specified RT username
+    1 - search in JIRA where RT usernames are <first_initial><last_name>
+        and JIRA usernames are <first_name>.<last_name>
+
+    :param rt_username: the RT username to use as initial search criteria
+    :param algo_type: the algorithm type specified (0 or 1)
+    :param jira_issue: the JIRA ticket to use as a basis for this search
+    """
+    # XXX: Delete this.
+    pp.pprint('rt_username: ' + rt_username + ' algo_type: ' + str(algo_type))
+    users = None
+    if algo_type == 1:
+        users = jira.search_assignable_users_for_issues(rt_username[1:], issueKey=jira_issue)
+    else:
+        users = jira.search_assignable_users_for_issues(rt_username, issueKey=jira_issue)
+
+    # XXX: Delete this.
+    pp.pprint(users)
+
+    regex = None
+    if algo_type == 1:
+        regex = re.compile('^' + rt_username[0] + '.*\.' + rt_username[1:] + '$')
+    else:
+        regex = re.compile('^' + rt_username + '$')
+
+    ret_user = None
+    for user in users:
+        match = regex.search(user.name)
+        if match:
+            # XXX: Delete this.
+            pp.pprint(user.name)
+            ret_user = user
+            break
+
+    return ret_user
 
 # Read global configuration settings
 config_file = 'config.ini'
@@ -206,6 +332,13 @@ try:
             logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
             syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
 
+            # TODO: Clean this up further.
+            user = find_user(ticket_requester, config.getint('jira', 'find_user_algo_type_description'), jira_issue)
+            if user:
+                logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
+                syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
+                jira.add_watcher(jira_issue, user.name)
+
         # Next, obtain all current comments on the JIRA ticket. 
         jira_comments = jira.comments(jira_issue)
 
@@ -247,11 +380,16 @@ try:
                 logger.info('Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
                 syslog.syslog(syslog.LOG_INFO, 'Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
                 comment_body = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + c['Creator'] + '\nTicket ID: ' + ticket_id + '\nAction: ' + c['Description'] + '\n\n' + c['Content']
-
                 # JIRA can't store comments more than 32,000 chars in length
                 truncated_comment = (comment_body[:31997] + '...') if len(comment_body) > 32000 else comment_body
-
                 new_comment = jira.add_comment(jira_issue, truncated_comment)
+
+                # TODO: Clean this up further.
+                user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), jira_issue)
+                if user:
+                    logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
+                    syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
+                    jira.add_watcher(jira_issue, user.name)
 
 except RTResourceError as e:
     logger.error('RT processing error occurred.')
