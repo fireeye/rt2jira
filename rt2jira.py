@@ -83,6 +83,24 @@ def package(r):
     d = dict(izip(k,v))
     return d
 
+def config_get_dict(config, section, option):
+    """
+    Given a configuration section and option, fetch and parse the data
+    as if it were a dict.  Return the resultant data as a dict.
+
+    :param config: the parsed configuration object
+    :param section: the section to extract
+    :param option: the option to parse
+    """
+    fields_raw = config.get(section, option)
+    ret_fields = {}
+    if fields_raw:
+        regex_iter = re.finditer('\("([a-zA-Z0-9_]*)", "([a-zA-Z0-9_\.\ ]*)"\)', fields_raw)
+        fields = [(c.group(1), c.group(2)) for c in regex_iter]
+        ret_fields = package(fields)
+ 
+    return ret_fields
+
 def find_id_range(jira_issue):
     """
     Given an existing JIRA ticket, search the ticket and extract out
@@ -116,28 +134,27 @@ def resolve(jira_issue):
 
     :param jira_issue: the specified JIRA ticket
     """
-    state_name = 'Resolve'
+    state_name = config.get('jira', 'resolve_transition_name')
     state_id = None
-    resolution_name = 'Done'
+    resolution_name = config.get('jira', 'resolve_resolution_name') 
     resolution_id = None
 
-    for transition in jira.transitions(issue):
+    for transition in jira.transitions(jira_issue):
         if state_name in transition['name']:
-            # XXX: Delete this.
-            pp.pprint(transition['id'])
             state_id = transition['id']
             break
 
     for resolution in jira.resolutions():
         if resolution_name in resolution.name:
-            # XXX: Delete this.
-            pp.pprint(resolution)
             resolution_id = resolution.id
             break
 
-    # XXX: Delete this.
-    pp.pprint('state_id:' + state_id + ' resolution_id:' + resolution_id)
-    jira.transition_issue(jira_issue, state_id, fields={ 'resolution': { 'id': resolution_id }, 'customfield_10902':'None' }, comment='Resolving ticket.')
+    if state_id and resolution_id:
+        fields_dict = config_get_dict(config, 'jira', 'resolve_fields')
+        fields_dict['resolution'] = { 'id': resolution_id }
+        logger.info('Resolving ticket (' + jira_issue.key + ')')
+        syslog.syslog(syslog.LOG_INFO, 'Resolving ticket (' + jira_issue.key + ')')
+        jira.transition_issue(jira_issue, state_id, fields=fields_dict, comment=config.get('jira', 'resolve_comment'))
 
 def reopen(jira_issue):
     """
@@ -145,24 +162,22 @@ def reopen(jira_issue):
 
     :param jira_issue: the specified JIRA ticket
     """
-    state_name = 'Reopen Issue'
+    state_name = config.get('jira', 'reopen_transition_name')
     state_id = None
 
-    for transition in jira.transitions(issue):
+    for transition in jira.transitions(jira_issue):
         if state_name in transition['name']:
-            # XXX: Delete this.
-            pp.pprint(transition['id'])
             state_id = transition['id']
             break
 
-    # XXX: Delete this.
-    pp.pprint('state_id:' + state_id)
-    jira.transition_issue(jira_issue, state_id, comment='Reopening ticket.')
+    jira.transition_issue(jira_issue, state_id, comment=config.get('jira', 'reopen_comment'))
 
-def find_user(rt_username, algo_type, jira_issue):
+def find_user(rt_username, algo_type, project_keys):
     """
     Given an RT username, returns the corresponding JIRA username that best
-    matches this user.  Two different algorithms are provided:
+    matches this user.  None is returned, otherwise.
+
+    Two different algorithms are provided:
 
     0 - straight search in JIRA using the specified RT username
     1 - search in JIRA where RT usernames are <first_initial><last_name>
@@ -170,31 +185,24 @@ def find_user(rt_username, algo_type, jira_issue):
 
     :param rt_username: the RT username to use as initial search criteria
     :param algo_type: the algorithm type specified (0 or 1)
-    :param jira_issue: the JIRA ticket to use as a basis for this search
+    :param project_keys: comma-separated list of project keys to check for issue assignment permissions
     """
-    # XXX: Delete this.
-    pp.pprint('rt_username: ' + rt_username + ' algo_type: ' + str(algo_type))
     users = None
     if algo_type == 1:
-        users = jira.search_assignable_users_for_issues(rt_username[1:], issueKey=jira_issue)
+        users = jira.search_assignable_users_for_projects(rt_username[1:], project_keys)
     else:
-        users = jira.search_assignable_users_for_issues(rt_username, issueKey=jira_issue)
-
-    # XXX: Delete this.
-    pp.pprint(users)
+        users = jira.search_assignable_users_for_projects(rt_username, project_keys)
 
     regex = None
     if algo_type == 1:
-        regex = re.compile('^' + rt_username[0] + '.*\.' + rt_username[1:] + '$')
+        regex = re.compile('^' + rt_username[0] + '.*\.' + rt_username[1:] + '$', re.IGNORECASE)
     else:
-        regex = re.compile('^' + rt_username + '$')
+        regex = re.compile('^' + rt_username + '$', re.IGNORECASE)
 
     ret_user = None
     for user in users:
         match = regex.search(user.name)
         if match:
-            # XXX: Delete this.
-            pp.pprint(user.name)
             ret_user = user
             break
 
@@ -303,11 +311,24 @@ try:
         sanitized_summary = re.sub('[^0-9A-Za-z\.\- ]', ' ', ticket_summary)
         sanitized_summary = ' '.join([item.strip() for item in sanitized_summary.split(' ') if len(item) > 3])
         sanitized_summary = re.sub('--', '', sanitized_summary)
-        logger.debug('JQL Search Terms: ' + sanitized_summary)
-        syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
+        sanitized_summary = re.sub(' -', ' ', sanitized_summary)
 
-        # Check if JIRA ticket already exists.
-        jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
+        jira_results = None
+        if sanitized_summary:
+            logger.debug('JQL Search Terms: ' + sanitized_summary)
+            syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
+
+            # Check if JIRA ticket already exists.
+            jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
+        else:
+            # If the sanitized summary is empty, then search specifically for the Ticket ID reference in the JIRA ticket description.
+            description = 'Ticket ID: ' + ticket_id
+
+            logger.debug('JQL Search Terms: ' + sanitized_summary)
+            syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
+
+            # Check if JIRA ticket already exists.
+            jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC')
 
         # Check if at least one matching JIRA ticket exists.
         jira_issue = None
@@ -322,8 +343,9 @@ try:
                     jira_issue = result
                     break
 
-            logger.info('Found existing JIRA ticket (' + jira_issue.key + ')')
-            syslog.syslog(syslog.LOG_INFO, 'Found existing JIRA ticket (' + jira_issue.key + ')')
+            if jira_issue:
+                logger.info('Found existing JIRA ticket (' + jira_issue.key + ')')
+                syslog.syslog(syslog.LOG_INFO, 'Found existing JIRA ticket (' + jira_issue.key + ')')
 
         if not jira_issue:
             # If there's no match, then create a new JIRA ticket.
@@ -332,12 +354,20 @@ try:
             logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
             syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
 
-            # TODO: Clean this up further.
-            user = find_user(ticket_requester, config.getint('jira', 'find_user_algo_type_description'), jira_issue)
+            user = find_user(ticket_requester, config.getint('jira', 'find_user_algo_type_description'), config.get('jira', 'find_user_projects'))
             if user:
+                # Make the ticket requester the reporter of the JIRA ticket.
+                logger.debug('Making (' + user.name + ') the reporter of (' + jira_issue.key + ')')
+                syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the reporter of (' + jira_issue.key + ')')
+                jira_issue.update(fields={'reporter':{'name': user.name}})
+
+                # Auto-add ticket requester as watcher to the JIRA ticket.
                 logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
                 syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
                 jira.add_watcher(jira_issue, user.name)
+            else:
+                logger.warn('Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
+                syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
 
         # Next, obtain all current comments on the JIRA ticket. 
         jira_comments = jira.comments(jira_issue)
@@ -384,12 +414,42 @@ try:
                 truncated_comment = (comment_body[:31997] + '...') if len(comment_body) > 32000 else comment_body
                 new_comment = jira.add_comment(jira_issue, truncated_comment)
 
-                # TODO: Clean this up further.
-                user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), jira_issue)
+                user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
                 if user:
+                    # Auto-add ticket commenter as watcher to the JIRA ticket.
                     logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
                     syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
                     jira.add_watcher(jira_issue, user.name)
+                else:
+                    logger.debug('Unable to find equivalent RT commenter in JIRA: ' + comment_creator)
+                    syslog.syslog(syslog.LOG_DEBUG, 'Unable to find equivalent RT commenter in JIRA: ' + comment_creator)
+
+                # Assign ticket, if RT ticket was taken.
+                if 'Taken by' in c['Description']:
+                    ticket_owner = re.sub('Taken by ', '', c['Description'])
+                    user = find_user(ticket_owner, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                    if user:
+                        logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                        syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                        jira_issue.update(fields={'assignee':{'name': user.name}})
+                    else:
+                        logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+                        syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+
+                if 'Given to' in c['Description']:
+                    ticket_owner = re.sub('Given to (\w+) by.*', '\\1', c['Description'])
+                    user = find_user(ticket_owner, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                    if user:
+                        logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                        syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                        jira_issue.update(fields={'assignee':{'name': user.name}})
+                    else:
+                        logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+                        syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+
+                # Resolve the ticket if it was resolved in RT.
+                if 'resolved' in c['Description']:
+                    resolve(jira_issue)
 
 except RTResourceError as e:
     logger.error('RT processing error occurred.')
