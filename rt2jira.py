@@ -128,15 +128,15 @@ def find_id_range(jira_issue):
 
     return ret
 
-def resolve(jira_issue):
+def resolve(jira_issue, resolution_name, resolve_comment):
     """
     Given a JIRA ticket, mark the ticket as resolved.
 
     :param jira_issue: the specified JIRA ticket
+    :param resolution_name: the specified type of resolution for this ticket
     """
     state_name = config.get('jira', 'resolve_transition_name')
     state_id = None
-    resolution_name = config.get('jira', 'resolve_resolution_name') 
     resolution_id = None
 
     for transition in jira.transitions(jira_issue):
@@ -154,7 +154,7 @@ def resolve(jira_issue):
         fields_dict['resolution'] = { 'id': resolution_id }
         logger.info('Resolving ticket (' + jira_issue.key + ')')
         syslog.syslog(syslog.LOG_INFO, 'Resolving ticket (' + jira_issue.key + ')')
-        jira.transition_issue(jira_issue, state_id, fields=fields_dict, comment=config.get('jira', 'resolve_comment'))
+        jira.transition_issue(jira_issue, state_id, fields=fields_dict, comment=resolve_comment)
 
 def reopen(jira_issue):
     """
@@ -280,205 +280,207 @@ except:
     syslog.syslog(syslog.LOG_ERR, "Unable to connect to JIRA server.")
     sys.exit(1)
 
-# Process the most recent activity currently stored.
-logger.info('Starting - Feed Last Updated: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
-syslog.syslog(syslog.LOG_NOTICE, 'Starting - Feed Last Updated: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
-last_updated_activity = stored_last_updated_activity
+if __name__ == '__main__':
 
-try:
-    # For each ticket found in the source feed
-    for e in feed.parsed:
-        t = package(e)
-        ticket_id = re.sub('ticket\/', '', t['id'])
-        ticket_requester = re.sub('\@.*', '', t['Requestors'])
-        ticket_requester_name = titlecase(re.sub('[0-9]', '', re.sub('\.', ' ', ticket_requester)))
-        ticket_date = rt_parse_ticket_time(t['Created']) 
-        ticket_last_updated = rt_parse_ticket_time(t['LastUpdated']) 
+    # Process the most recent activity currently stored.
+    logger.info('Starting - Feed Last Updated: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
+    syslog.syslog(syslog.LOG_NOTICE, 'Starting - Feed Last Updated: ' + rt_format_ticket_time(stored_last_updated_activity) + ' UTC')
+    last_updated_activity = stored_last_updated_activity
 
-        # Scrub ticket title to remove 're:' and 'fw:' prefixes
-        scrubbed_title = re.sub('^(?i)(re|fw|fwd):( |)', '', t['Subject'])
-        #ticket_summary = ticket_requester_name + ': ' + scrubbed_title
-        ticket_summary = scrubbed_title
-        logger.info('Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
-        syslog.syslog(syslog.LOG_INFO, 'Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
-
-        # If stored timestamp is more recent than the comment, then skip processing the comment.
-        if stored_last_updated_activity >= ticket_last_updated:
-            logger.debug('RT ticket older than stored timestamp, skipping')
-            syslog.syslog(syslog.LOG_DEBUG, 'RT ticket older than stored timestamp, skipping')
-            continue
-
-        sanitized_summary = re.sub('[^0-9A-Za-z\.\- ]', ' ', ticket_summary)
-        sanitized_summary = ' '.join([item.strip() for item in sanitized_summary.split(' ') if len(item) > 3])
-        sanitized_summary = re.sub('--', '', sanitized_summary)
-        sanitized_summary = re.sub(' -', ' ', sanitized_summary)
-
-        jira_results = None
-        if sanitized_summary:
-            logger.debug('JQL Search Terms: ' + sanitized_summary)
-            syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
-
-            # Check if JIRA ticket already exists.
-            jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
-        else:
-            # If the sanitized summary is empty, then search specifically for the Ticket ID reference in the JIRA ticket description.
-            description = 'Ticket ID: ' + ticket_id
-
-            logger.debug('JQL Search Terms: ' + sanitized_summary)
-            syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
-
-            # Check if JIRA ticket already exists.
-            jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC')
-
-        # Check if at least one matching JIRA ticket exists.
-        jira_issue = None
-        if jira_results:
-            # Iterate through the resuling JIRA ticket search results
-            # Find the first JIRA ticket where the ticket IDs listed in the ticket are within +/- 10 of the RT ticket ID
-            for result in jira_results:
-                id_range = find_id_range(result)
-                original_id = int(ticket_id)
-                id_correlation_range = config.getint('rt', 'ticket_id_correlation_range')
-                if (((id_range[0] - id_correlation_range) <= original_id) and (original_id <= (id_range[-1] + id_correlation_range))):
-                    jira_issue = result
-                    break
-
-            if jira_issue:
-                logger.info('Found existing JIRA ticket (' + jira_issue.key + ')')
-                syslog.syslog(syslog.LOG_INFO, 'Found existing JIRA ticket (' + jira_issue.key + ')')
-
-        if not jira_issue:
-            # If there's no match, then create a new JIRA ticket.
-            ticket_description = 'Ticket ID: ' + ticket_id + '\n' + config.get('rt', 'url_ticket_display_prefix') + ticket_id + '\nTitle: ' + scrubbed_title + '\nRequester: ' + ticket_requester_name  + '\nCreated Date: ' + rt_format_ticket_time(ticket_date)
-            jira_issue = jira.create_issue(project={'key':config.get('jira', 'project')}, summary=ticket_summary, description=ticket_description, issuetype={'name':'Bug'}, components=[{'name':config.get('jira', 'component')}])
-            logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
-            syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
-
-            user = find_user(ticket_requester, config.getint('jira', 'find_user_algo_type_description'), config.get('jira', 'find_user_projects'))
-            if user:
-                # Make the ticket requester the reporter of the JIRA ticket.
-                logger.debug('Making (' + user.name + ') the reporter of (' + jira_issue.key + ')')
-                syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the reporter of (' + jira_issue.key + ')')
-                jira_issue.update(fields={'reporter':{'name': user.name}})
-
-                # Auto-add ticket requester as watcher to the JIRA ticket.
-                logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
-                syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
-                jira.add_watcher(jira_issue, user.name)
-            else:
-                logger.warn('Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
-                syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
-
-        # Next, obtain all current comments on the JIRA ticket. 
-        jira_comments = jira.comments(jira_issue)
-
-        # Finally, loop through all non-system comments currently associated to the RT ticket.
-        rt_response = resource.get(path='ticket/'+ticket_id+'/history?format=l')
-        for r in rt_response.parsed:
-            c = package(r)
-            comment_date = rt_parse_comment_time(c['Created']) 
-
-            # Skip system comments.
-            if c['Creator'] == 'RT_System':
-                continue
-
+    try:
+        # For each ticket found in the source feed
+        for e in feed.parsed:
+            t = package(e)
+            ticket_id = re.sub('ticket\/', '', t['id'])
+            ticket_requester = re.sub('\@.*', '', t['Requestors'])
+            ticket_requester_name = titlecase(re.sub('[0-9]', '', re.sub('\.', ' ', ticket_requester)))
+            ticket_date = rt_parse_ticket_time(t['Created']) 
+            ticket_last_updated = rt_parse_ticket_time(t['LastUpdated']) 
+    
+            # Scrub ticket title to remove 're:' and 'fw:' prefixes
+            scrubbed_title = re.sub('^(?i)(re|fw|fwd):( |)', '', t['Subject'])
+            #ticket_summary = ticket_requester_name + ': ' + scrubbed_title
+            ticket_summary = scrubbed_title
+            logger.info('Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
+            syslog.syslog(syslog.LOG_INFO, 'Processing Ticket ID (' + ticket_id + ') - ' + ticket_summary)
+    
             # If stored timestamp is more recent than the comment, then skip processing the comment.
-            if stored_last_updated_activity >= comment_date:
-                logger.debug('RT comment older than stored timestamp, skipping')
-                syslog.syslog(syslog.LOG_DEBUG, 'RT comment older than stored timestamp, skipping')
+            if stored_last_updated_activity >= ticket_last_updated:
+                logger.debug('RT ticket older than stored timestamp, skipping')
+                syslog.syslog(syslog.LOG_DEBUG, 'RT ticket older than stored timestamp, skipping')
                 continue
-            elif comment_date > last_updated_activity:
-                # If the comment timestamp is more recent than the current timestamp of most recent activity,
-                # then update the current timestamp of most recent activity.
-                last_updated_activity = comment_date
 
-            # Check to see if the comment already exists in the JIRA ticket.
-            comment_creator = re.sub('\@.*', '', c['Creator'])
-            comment_uuid = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + comment_creator
+            sanitized_summary = re.sub('[^0-9A-Za-z\.\- ]', ' ', ticket_summary)
+            sanitized_summary = ' '.join([item.strip() for item in sanitized_summary.split(' ') if len(item) > 3])
+            sanitized_summary = re.sub('--', '', sanitized_summary)
+            sanitized_summary = re.sub(' -', ' ', sanitized_summary)
+    
+            jira_results = None
+            if sanitized_summary:
+                logger.debug('JQL Search Terms: ' + sanitized_summary)
+                syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
+    
+                # Check if JIRA ticket already exists.
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
+            else:
+                # If the sanitized summary is empty, then search specifically for the Ticket ID reference in the JIRA ticket description.
+                description = 'Ticket ID: ' + ticket_id
+    
+                logger.debug('JQL Search Terms: ' + sanitized_summary)
+                syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
+    
+                # Check if JIRA ticket already exists.
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC')
+    
+            # Check if at least one matching JIRA ticket exists.
+            jira_issue = None
+            if jira_results:
+                # Iterate through the resuling JIRA ticket search results
+                # Find the first JIRA ticket where the ticket IDs listed in the ticket are within +/- 10 of the RT ticket ID
+                for result in jira_results:
+                    id_range = find_id_range(result)
+                    original_id = int(ticket_id)
+                    id_correlation_range = config.getint('rt', 'ticket_id_correlation_range')
+                    if (((id_range[0] - id_correlation_range) <= original_id) and (original_id <= (id_range[-1] + id_correlation_range))):
+                        jira_issue = result
+                        break
 
-            comment_exists = False
-            for existing_comment in jira_comments:
-                logger.debug('Searching (' + jira_issue.key + ') comment (' + existing_comment.id + ')')
-                syslog.syslog(syslog.LOG_DEBUG, 'Searching (' + jira_issue.key + ') comment (' + existing_comment.id + ')')
-                if comment_uuid in existing_comment.body:
-                    comment_exists = True
-                    logger.debug('RT comment already exists, skipping')
-                    syslog.syslog(syslog.LOG_DEBUG, 'RT comment already exists, skipping')
-                    break
-
-            if not comment_exists:
-                logger.info('Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
-                syslog.syslog(syslog.LOG_INFO, 'Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
-                comment_body = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + c['Creator'] + '\nTicket ID: ' + ticket_id + '\nAction: ' + c['Description'] + '\n\n' + c['Content']
-                # JIRA can't store comments more than 32,000 chars in length
-                truncated_comment = (comment_body[:31997] + '...') if len(comment_body) > 32000 else comment_body
-                new_comment = jira.add_comment(jira_issue, truncated_comment)
-
-                user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                if jira_issue:
+                    logger.info('Found existing JIRA ticket (' + jira_issue.key + ')')
+                    syslog.syslog(syslog.LOG_INFO, 'Found existing JIRA ticket (' + jira_issue.key + ')')
+    
+            if not jira_issue:
+                # If there's no match, then create a new JIRA ticket.
+                ticket_description = 'Ticket ID: ' + ticket_id + '\n' + config.get('rt', 'url_ticket_display_prefix') + ticket_id + '\nTitle: ' + scrubbed_title + '\nRequester: ' + ticket_requester_name  + '\nCreated Date: ' + rt_format_ticket_time(ticket_date)
+                jira_issue = jira.create_issue(project={'key':config.get('jira', 'project')}, summary=ticket_summary, description=ticket_description, issuetype={'name':'Bug'}, components=[{'name':config.get('jira', 'component')}])
+                logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
+                syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
+    
+                user = find_user(ticket_requester, config.getint('jira', 'find_user_algo_type_description'), config.get('jira', 'find_user_projects'))
                 if user:
-                    # Auto-add ticket commenter as watcher to the JIRA ticket.
+                    # Make the ticket requester the reporter of the JIRA ticket.
+                    logger.debug('Making (' + user.name + ') the reporter of (' + jira_issue.key + ')')
+                    syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the reporter of (' + jira_issue.key + ')')
+                    jira_issue.update(fields={'reporter':{'name': user.name}})
+    
+                    # Auto-add ticket requester as watcher to the JIRA ticket.
                     logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
                     syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
                     jira.add_watcher(jira_issue, user.name)
                 else:
-                    logger.debug('Unable to find equivalent RT commenter in JIRA: ' + comment_creator)
-                    syslog.syslog(syslog.LOG_DEBUG, 'Unable to find equivalent RT commenter in JIRA: ' + comment_creator)
-
-                # Assign ticket, if RT ticket was taken.
-                if 'Taken by' in c['Description']:
-                    ticket_owner = re.sub('Taken by ', '', c['Description'])
-                    user = find_user(ticket_owner, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                    logger.warn('Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
+                    syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
+    
+            # Next, obtain all current comments on the JIRA ticket. 
+            jira_comments = jira.comments(jira_issue)
+    
+            # Finally, loop through all non-system comments currently associated to the RT ticket.
+            rt_response = resource.get(path='ticket/'+ticket_id+'/history?format=l')
+            for r in rt_response.parsed:
+                c = package(r)
+                comment_date = rt_parse_comment_time(c['Created']) 
+    
+                # Skip system comments.
+                if c['Creator'] == 'RT_System':
+                    continue
+    
+                # If stored timestamp is more recent than the comment, then skip processing the comment.
+                if stored_last_updated_activity >= comment_date:
+                    logger.debug('RT comment older than stored timestamp, skipping')
+                    syslog.syslog(syslog.LOG_DEBUG, 'RT comment older than stored timestamp, skipping')
+                    continue
+                elif comment_date > last_updated_activity:
+                    # If the comment timestamp is more recent than the current timestamp of most recent activity,
+                    # then update the current timestamp of most recent activity.
+                    last_updated_activity = comment_date
+    
+                # Check to see if the comment already exists in the JIRA ticket.
+                comment_creator = re.sub('\@.*', '', c['Creator'])
+                comment_uuid = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + comment_creator
+    
+                comment_exists = False
+                for existing_comment in jira_comments:
+                    logger.debug('Searching (' + jira_issue.key + ') comment (' + existing_comment.id + ')')
+                    syslog.syslog(syslog.LOG_DEBUG, 'Searching (' + jira_issue.key + ') comment (' + existing_comment.id + ')')
+                    if comment_uuid in existing_comment.body:
+                        comment_exists = True
+                        logger.debug('RT comment already exists, skipping')
+                        syslog.syslog(syslog.LOG_DEBUG, 'RT comment already exists, skipping')
+                        break
+    
+                if not comment_exists:
+                    logger.info('Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
+                    syslog.syslog(syslog.LOG_INFO, 'Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
+                    comment_body = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + c['Creator'] + '\nTicket ID: ' + ticket_id + '\nAction: ' + c['Description'] + '\n\n' + c['Content']
+                    # JIRA can't store comments more than 32,000 chars in length
+                    truncated_comment = (comment_body[:31997] + '...') if len(comment_body) > 32000 else comment_body
+                    new_comment = jira.add_comment(jira_issue, truncated_comment)
+    
+                    user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
                     if user:
-                        logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
-                        syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
-                        jira_issue.update(fields={'assignee':{'name': user.name}})
+                        # Auto-add ticket commenter as watcher to the JIRA ticket.
+                        logger.debug('Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
+                        syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + user.name + ') as a watcher to (' + jira_issue.key + ')')
+                        jira.add_watcher(jira_issue, user.name)
                     else:
-                        logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
-                        syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
-
-                if 'Given to' in c['Description']:
-                    ticket_owner = re.sub('Given to (\w+) by.*', '\\1', c['Description'])
-                    user = find_user(ticket_owner, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
-                    if user:
-                        logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
-                        syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
-                        jira_issue.update(fields={'assignee':{'name': user.name}})
-                    else:
-                        logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
-                        syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
-
-                # Resolve the ticket if it was resolved in RT.
-                if 'resolved' in c['Description']:
-                    resolve(jira_issue)
-
-except RTResourceError as e:
-    logger.error('RT processing error occurred.')
-    syslog.syslog(syslog.LOG_ERR, 'RT processing error occurred.')
-    logger.error(e.response.status_int)
-    syslog.syslog(syslog.LOG_ERR, e.response.status_int)
-    logger.error(e.response.status)
-    syslog.syslog(syslog.LOG_ERR, e.response.status)
-    logger.error(e.response.parsed)
-    syslog.syslog(syslog.LOG_ERR, e.response.parsed)
-    sys.exit(1)
-except JIRAError as e:
-    logger.error('JIRA processing error occurred.')
-    syslog.syslog(syslog.LOG_ERR, 'JIRA processing error occurred.')
-    logger.error(e)
-    syslog.syslog(syslog.LOG_ERR, e)
-    sys.exit(1)
-except:
-    logger.error('Unknown processing error occurred.')
-    syslog.syslog(syslog.LOG_ERR, 'Unknown processing error occurred.')
-    sys.exit(1)
-
-# Update the RT feed timestamp
-try:
-    config.set('rt', 'last_fetched_timestamp', rt_format_ticket_time(last_updated_activity))
-    with open(config_file, 'wb') as config_output:
-        config.write(config_output)
-
-    logger.info('Done - Feed Last Updated: ' + config.get('rt', 'last_fetched_timestamp')  + ' UTC')
-    syslog.syslog(syslog.LOG_NOTICE, 'Done - Feed Last Updated: ' + config.get('rt', 'last_fetched_timestamp')  + ' UTC')
-except:
-    pass
+                        logger.debug('Unable to find equivalent RT commenter in JIRA: ' + comment_creator)
+                        syslog.syslog(syslog.LOG_DEBUG, 'Unable to find equivalent RT commenter in JIRA: ' + comment_creator)
+    
+                    # Assign ticket, if RT ticket was taken.
+                    if 'Taken by' in c['Description']:
+                        ticket_owner = re.sub('Taken by ', '', c['Description'])
+                        user = find_user(ticket_owner, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                        if user:
+                            logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                            syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                            jira_issue.update(fields={'assignee':{'name': user.name}})
+                        else:
+                            logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+                            syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+    
+                    if 'Given to' in c['Description']:
+                        ticket_owner = re.sub('Given to (\w+) by.*', '\\1', c['Description'])
+                        user = find_user(ticket_owner, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                        if user:
+                            logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                            syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                            jira_issue.update(fields={'assignee':{'name': user.name}})
+                        else:
+                            logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+                            syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+    
+                    # Resolve the ticket if it was resolved in RT.
+                    if 'resolved' in c['Description']:
+                        resolve(jira_issue, config.get('jira', 'resolve_resolution_name'), config.get('jira', 'resolve_comment'))
+    
+    except RTResourceError as e:
+        logger.error('RT processing error occurred.')
+        syslog.syslog(syslog.LOG_ERR, 'RT processing error occurred.')
+        logger.error(e.response.status_int)
+        syslog.syslog(syslog.LOG_ERR, e.response.status_int)
+        logger.error(e.response.status)
+        syslog.syslog(syslog.LOG_ERR, e.response.status)
+        logger.error(e.response.parsed)
+        syslog.syslog(syslog.LOG_ERR, e.response.parsed)
+        sys.exit(1)
+    except JIRAError as e:
+        logger.error('JIRA processing error occurred.')
+        syslog.syslog(syslog.LOG_ERR, 'JIRA processing error occurred.')
+        logger.error(e)
+        syslog.syslog(syslog.LOG_ERR, e)
+        sys.exit(1)
+    except:
+        logger.error('Unknown processing error occurred.')
+        syslog.syslog(syslog.LOG_ERR, 'Unknown processing error occurred.')
+        sys.exit(1)
+    
+    # Update the RT feed timestamp
+    try:
+        config.set('rt', 'last_fetched_timestamp', rt_format_ticket_time(last_updated_activity))
+        with open(config_file, 'wb') as config_output:
+            config.write(config_output)
+    
+        logger.info('Done - Feed Last Updated: ' + config.get('rt', 'last_fetched_timestamp')  + ' UTC')
+        syslog.syslog(syslog.LOG_NOTICE, 'Done - Feed Last Updated: ' + config.get('rt', 'last_fetched_timestamp')  + ' UTC')
+    except:
+        pass
