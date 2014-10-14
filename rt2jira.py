@@ -187,9 +187,13 @@ def find_user(rt_username, algo_type, project_keys):
     :param algo_type: the algorithm type specified (0 or 1)
     :param project_keys: comma-separated list of project keys to check for issue assignment permissions
     """
+    users_dict = config_get_dict(config, 'jira', 'find_user_mapping')
     users = None
     if algo_type == 1:
-        users = jira.search_assignable_users_for_projects(rt_username[1:], project_keys)
+        if rt_username in users_dict:
+            users = jira.search_assignable_users_for_projects(users_dict[rt_username], project_keys)
+        else:
+            users = jira.search_assignable_users_for_projects(rt_username[1:], project_keys)
     else:
         users = jira.search_assignable_users_for_projects(rt_username, project_keys)
 
