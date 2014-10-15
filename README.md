@@ -7,7 +7,7 @@ Darien Kindlund (darien.kindlund@fireeye.com)
 
 ## Description ##
 
-This Python script automatically convert RT tickets to JIRA tickets, where the uniqueness of the RT ticket is based on the (requestor identity, subject) of the RT ticket, which will then get assigned a unique JIRA ticket.  This script will also synchronize new comments on existing RT tickets and represent them as new JIRA comments.  **However**, this script is a 1-way sync.  It will **not** take new JIRA comments/tickets and represent that activity in new/existing RT tickets.
+This Python script automatically convert RT tickets to JIRA tickets, where the uniqueness of the RT ticket is based on the (requestor identity, subject) of the RT ticket, which will then get assigned a unique JIRA ticket.  This script will also synchronize new comments on existing RT tickets and represent them as new JIRA comments.  **However**, this script is a 1-way sync.  It will **not** take new JIRA comments/tickets and represent that activity in new/existing RT tickets.  This script is designed to be run on a periodic basis, in order to resync new RT tickets to JIRA tickets.
 
 ## Prerequisites ##
 
@@ -91,3 +91,7 @@ The following are comments on some of the INI settings.
 2. I made a mistake; how do I reset the state of this script?
 
     Clear out the `last_fetched_timestamp` value so that it is completely empty.  Next, adjust the **5** value in `api_search_suffix` to be a much higher value, in order to go further back in time.  Once fixed, re-run the script and it should start processing much older RT tickets.  If it still isn't going back far enough, increase the **5** value to be even higher.
+
+3. How does this compare with other RT-to-JIRA migration scripts?
+
+    Unlike other scripts, this script is designed to be run on a continual basis, rather than just as a one-time operation.  Sure, you can use it to bulk-convert all RT tickets over to JIRA and then retire the RT instance, but this script is also **flexible** enough to support continual sync between RT and JIRA, so that both systems remain in operation.
