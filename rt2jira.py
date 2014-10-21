@@ -214,6 +214,7 @@ def find_user(rt_username, algo_type, project_keys):
 
 # Read global configuration settings
 config_file = 'config.ini'
+#config_file = sys.argv[1]
 config = ConfigParser.RawConfigParser(allow_no_value=True)
 try:
     config.read([config_file])
@@ -325,19 +326,24 @@ if __name__ == '__main__':
                 syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
     
                 # Check if JIRA ticket already exists.
-                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created DESC')
             else:
                 # If the sanitized summary is empty, then search specifically for the Ticket ID reference in the JIRA ticket description.
                 description = 'Ticket ID: ' + ticket_id
+
+                # If the ticket_summary was completely empty, then create an artificial one.
+                if not ticket_summary:
+                    ticket_summary = description
     
-                logger.debug('JQL Search Terms: ' + sanitized_summary)
-                syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
-    
+                logger.debug('JQL Search Terms: ' + description)
+                syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + description)
+
                 # Check if JIRA ticket already exists.
-                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC')
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created DESC')
     
             # Check if at least one matching JIRA ticket exists.
             jira_issue = None
+
             if jira_results:
                 # Iterate through the resuling JIRA ticket search results
                 # Find the first JIRA ticket where the ticket IDs listed in the ticket are within +/- 10 of the RT ticket ID
@@ -345,7 +351,8 @@ if __name__ == '__main__':
                     id_range = find_id_range(result)
                     original_id = int(ticket_id)
                     id_correlation_range = config.getint('rt', 'ticket_id_correlation_range')
-                    if (((id_range[0] - id_correlation_range) <= original_id) and (original_id <= (id_range[-1] + id_correlation_range))):
+                    
+                    if id_range and (((id_range[0] - id_correlation_range) <= original_id) and (original_id <= (id_range[-1] + id_correlation_range))):
                         jira_issue = result
                         break
 
