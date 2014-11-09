@@ -215,7 +215,6 @@ def find_user(rt_username, algo_type, project_keys):
 # Read global configuration settings
 config_file = sys.argv[1]
 config = ConfigParser.RawConfigParser(allow_no_value=True)
-
 try:
     config.read([config_file])
 except:
@@ -456,6 +455,28 @@ if __name__ == '__main__':
                         else:
                             logger.warn('Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
                             syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + ticket_owner)
+
+                    # Assign ticket, if a dupe RT ticket was created and current ticket is unassigned.
+                    # The assumption here is that whoever has most recently repled to the RT ticket via email is likely the default assignee of the ticket.
+                    fields_dict = config_get_dict(config, 'jira', 'create_fields')
+                    if fields_dict != {} and not jira_issue.fields.assignee:
+                        for k,v in fields_dict.iteritems():
+                            try:
+				if 'ticket_id' in v and 'Ticket created by' in c['Description'] and eval('jira_issue.fields.' + k) != ticket_id:
+                                    user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
+                                    if user:
+                                        logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                                        syslog.syslog(syslog.LOG_DEBUG, 'Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
+                                        jira_issue.update(fields={'assignee':{'name': user.name}})
+                                    else:
+                                        try:
+                                            logger.debug('Making (' + comment_creator + ') the assignee of (' + jira_issue.key + ')')
+                                            jira_issue.update(fields={'assignee':{'name': comment_creator}})
+                                        except: 
+                                            logger.warn('Unable to find equivalent RT owner in JIRA: ' + comment_creator)
+                                            syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT owner in JIRA: ' + comment_creator)
+                            except:
+                                continue
     
                     if 'Given to' in c['Description']:
                         ticket_owner = re.sub('Given to (\w+) by.*', '\\1', c['Description'])
