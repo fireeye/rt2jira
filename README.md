@@ -24,7 +24,7 @@ This Python script automatically convert RT tickets to JIRA tickets, where the u
 
 3. Edit and review the `config.ini` file.
 
-4. Run: `python rt2jira.py`
+4. Run: `python rt2jira.py config.ini`
 
 5. Rerun the script as often as you want the RT queue and the JIRA tickets synchronized
 
@@ -95,3 +95,7 @@ The following are comments on some of the INI settings.
 3. How does this compare with other RT-to-JIRA migration scripts?
 
     Unlike other scripts, this script is designed to be run on a continual basis, rather than just as a one-time operation.  Sure, you can use it to bulk-convert all RT tickets over to JIRA and then retire the RT instance, but this script is also **flexible** enough to support continual sync between RT and JIRA, so that both systems remain in operation.
+
+4. I'm encountering the following error when running your script: HTTP 400: "The issue type selected is invalid."
+
+    This likely means that the default issue type 'Bug' isn't valid for your project.  Please edit the config.ini file and change the `issue_type` field from 'Bug' to some other valid issue type for your project (e.g., 'Task').

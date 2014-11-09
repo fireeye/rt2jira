@@ -213,9 +213,9 @@ def find_user(rt_username, algo_type, project_keys):
     return ret_user
 
 # Read global configuration settings
-config_file = 'config.ini'
-#config_file = sys.argv[1]
+config_file = sys.argv[1]
 config = ConfigParser.RawConfigParser(allow_no_value=True)
+
 try:
     config.read([config_file])
 except:
@@ -326,7 +326,7 @@ if __name__ == '__main__':
                 syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
     
                 # Check if JIRA ticket already exists.
-                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created DESC')
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
             else:
                 # If the sanitized summary is empty, then search specifically for the Ticket ID reference in the JIRA ticket description.
                 description = 'Ticket ID: ' + ticket_id
@@ -337,13 +337,12 @@ if __name__ == '__main__':
     
                 logger.debug('JQL Search Terms: ' + description)
                 syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + description)
-
+    
                 # Check if JIRA ticket already exists.
-                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created DESC')
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC')
     
             # Check if at least one matching JIRA ticket exists.
             jira_issue = None
-
             if jira_results:
                 # Iterate through the resuling JIRA ticket search results
                 # Find the first JIRA ticket where the ticket IDs listed in the ticket are within +/- 10 of the RT ticket ID
@@ -351,7 +350,6 @@ if __name__ == '__main__':
                     id_range = find_id_range(result)
                     original_id = int(ticket_id)
                     id_correlation_range = config.getint('rt', 'ticket_id_correlation_range')
-                    
                     if id_range and (((id_range[0] - id_correlation_range) <= original_id) and (original_id <= (id_range[-1] + id_correlation_range))):
                         jira_issue = result
                         break
@@ -363,9 +361,19 @@ if __name__ == '__main__':
             if not jira_issue:
                 # If there's no match, then create a new JIRA ticket.
                 ticket_description = 'Ticket ID: ' + ticket_id + '\n' + config.get('rt', 'url_ticket_display_prefix') + ticket_id + '\nTitle: ' + scrubbed_title + '\nRequester: ' + ticket_requester_name  + '\nCreated Date: ' + rt_format_ticket_time(ticket_date)
-                jira_issue = jira.create_issue(project={'key':config.get('jira', 'project')}, summary=ticket_summary, description=ticket_description, issuetype={'name':'Bug'}, components=[{'name':config.get('jira', 'component')}])
+                jira_issue = jira.create_issue(project={'key':config.get('jira', 'project')}, summary=ticket_summary, description=ticket_description, issuetype={'name':config.get('jira', 'issue_type')}, components=[{'name':config.get('jira', 'component')}])
                 logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
                 syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
+
+                # Update custom fields upon creation, if specified.
+                fields_dict = config_get_dict(config, 'jira', 'create_fields')
+                if fields_dict != {}:
+                    for k,v in fields_dict.iteritems():
+                        try:
+                            fields_dict[k] = eval(v)
+                        except:
+                            continue
+                    jira_issue.update(fields=fields_dict)
     
                 user = find_user(ticket_requester, config.getint('jira', 'find_user_algo_type_description'), config.get('jira', 'find_user_projects'))
                 if user:
