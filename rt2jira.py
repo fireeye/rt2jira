@@ -388,7 +388,38 @@ if __name__ == '__main__':
                 else:
                     logger.warn('Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
                     syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
-    
+
+                # Once the JIRA ticket is created, should the security level be modified?
+                if config.getboolean('jira', 'modify_security_level'):
+                    original_security_level = config.get('jira', 'original_security_level')
+                    original_security_level_mentioned = False
+                    if original_security_level != "None":
+                        if original_security_level in jira_issue.fields.description:
+                            original_security_level_mentioned = True
+                        else: 
+                            # Obtain all current comments on the JIRA ticket. 
+                            jira_comments = jira.comments(jira_issue)
+                            for existing_comment in jira_comments:
+                                if original_security_level in existing_comment.body:
+                                    original_security_level_mentioned = True
+                                    break 
+
+                    if original_security_level_mentioned:
+                        logger.debug('Original security level for JIRA ticket (' + jira_issue.key + ') mentioned')
+                        syslog.syslog(syslog.LOG_DEBUG, 'Original security level for JIRA ticket (' + jira_issue.key + ') mentioned')
+
+                    # If checks passed, then modify the security level.
+                    if not original_security_level_mentioned:
+                        target_security_level = config.get('jira', 'target_security_level')
+                        if target_security_level == "None":
+                            logger.info('Removing security level for JIRA ticket (' + jira_issue.key + ')')
+                            syslog.syslog(syslog.LOG_INFO, 'Removing security level for JIRA ticket (' + jira_issue.key + ')')
+                            jira_issue.update(fields={"security": None}) 
+                        else:
+                            logger.info('Setting security level of JIRA ticket (' + jira_issue.key + ') to (' + target_security_level + ')')
+                            syslog.syslog(syslog.LOG_INFO, 'Setting security level of JIRA ticket (' + jira_issue.key + ') to (' + target_security_level + ')')
+                            jira_issue.update(fields={"security":{'name': target_security_level}})
+                
             # Next, obtain all current comments on the JIRA ticket. 
             jira_comments = jira.comments(jira_issue)
     
@@ -462,7 +493,7 @@ if __name__ == '__main__':
                     if fields_dict != {} and not jira_issue.fields.assignee:
                         for k,v in fields_dict.iteritems():
                             try:
-				if 'ticket_id' in v and 'Ticket created by' in c['Description'] and eval('jira_issue.fields.' + k) != ticket_id:
+                                if 'ticket_id' in v and 'Ticket created by' in c['Description'] and eval('jira_issue.fields.' + k) != ticket_id:
                                     user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
                                     if user:
                                         logger.debug('Making (' + user.name + ') the assignee of (' + jira_issue.key + ')')
@@ -492,6 +523,23 @@ if __name__ == '__main__':
                     # Resolve the ticket if it was resolved in RT.
                     if 'resolved' in c['Description']:
                         resolve(jira_issue, config.get('jira', 'resolve_resolution_name'), config.get('jira', 'resolve_comment'))
+
+                    # Once the JIRA ticket is created, should the security level be modified?
+                    if config.getboolean('jira', 'modify_security_level'):
+                        original_security_level = config.get('jira', 'original_security_level')
+                        original_security_level_mentioned = False
+                        if original_security_level != "None" and original_security_level in new_comment.body:
+                            original_security_level_mentioned = True
+    
+                        if original_security_level_mentioned:
+                            logger.debug('Original security level for JIRA ticket (' + jira_issue.key + ') mentioned in comment')
+                            syslog.syslog(syslog.LOG_DEBUG, 'Original security level for JIRA ticket (' + jira_issue.key + ') mentioned in comment')
+    
+                        # If checks passed, then modify the security level.
+                        if original_security_level_mentioned and original_security_level != "None":
+                            logger.info('Setting security level of JIRA ticket (' + jira_issue.key + ') to (' + original_security_level + ')')
+                            syslog.syslog(syslog.LOG_INFO, 'Setting security level of JIRA ticket (' + jira_issue.key + ') to (' + original_security_level + ')')
+                            jira_issue.update(fields={"security":{'name': original_security_level}})
     
     except RTResourceError as e:
         logger.error('RT processing error occurred.')
