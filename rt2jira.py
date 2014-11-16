@@ -214,7 +214,8 @@ def find_user(rt_username, algo_type, project_keys):
 
 # Read global configuration settings
 config_file = sys.argv[1]
-config = ConfigParser.RawConfigParser(allow_no_value=True)
+#config = ConfigParser.RawConfigParser(allow_no_value=True)
+config = ConfigParser.RawConfigParser()
 try:
     config.read([config_file])
 except:
@@ -359,7 +360,7 @@ if __name__ == '__main__':
     
             if not jira_issue:
                 # If there's no match, then create a new JIRA ticket.
-                ticket_description = 'Ticket ID: ' + ticket_id + '\n' + config.get('rt', 'url_ticket_display_prefix') + ticket_id + '\nTitle: ' + scrubbed_title + '\nRequester: ' + ticket_requester_name  + '\nCreated Date: ' + rt_format_ticket_time(ticket_date)
+                ticket_description = 'Ticket ID: ' + ticket_id + '\n' + config.get('rt', 'url_ticket_display_prefix') + ticket_id + '\nSubject: ' + scrubbed_title + '\nRequester: ' + ticket_requester_name  + '\nCreated Date: ' + rt_format_ticket_time(ticket_date)
                 jira_issue = jira.create_issue(project={'key':config.get('jira', 'project')}, summary=ticket_summary, description=ticket_description, issuetype={'name':config.get('jira', 'issue_type')}, components=[{'name':config.get('jira', 'component')}])
                 logger.info('Creating new JIRA ticket (' + jira_issue.key + ')')
                 syslog.syslog(syslog.LOG_INFO, 'Creating new JIRA ticket (' + jira_issue.key + ')')
@@ -388,6 +389,14 @@ if __name__ == '__main__':
                 else:
                     logger.warn('Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
                     syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
+
+                # Once the JIRA ticket is created, should a new label be assigned to the ticket? 
+                new_issue_label = config.get('jira', 'new_issue_label')
+                if new_issue_label != "None":
+                    logger.debug('Adding label (' + new_issue_label + ') to (' + jira_issue.key + ')')
+                    syslog.syslog(syslog.LOG_DEBUG, 'Adding label (' + new_issue_label + ') to (' + jira_issue.key + ')')
+                    jira_issue.fields.labels.append(new_issue_label)
+                    jira_issue.update(fields={"labels": jira_issue.fields.labels})
 
                 # Once the JIRA ticket is created, should the security level be modified?
                 if config.getboolean('jira', 'modify_security_level'):
@@ -458,12 +467,17 @@ if __name__ == '__main__':
                         break
     
                 if not comment_exists:
-                    logger.info('Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
-                    syslog.syslog(syslog.LOG_INFO, 'Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
-                    comment_body = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + c['Creator'] + '\nTicket ID: ' + ticket_id + '\nAction: ' + c['Description'] + '\n\n' + c['Content']
+                    comment_body = 'Date: ' + rt_format_comment_time(comment_date) + '\nFrom: ' + c['Creator'] + '\nTicket ID: ' + ticket_id + '\nSubject: ' + scrubbed_title + '\nAction: ' + c['Description'] + '\n\n' + c['Content']
                     # JIRA can't store comments more than 32,000 chars in length
                     truncated_comment = (comment_body[:31997] + '...') if len(comment_body) > 32000 else comment_body
-                    new_comment = jira.add_comment(jira_issue, truncated_comment)
+
+                    # Only create the JIRA comment if this isn't an internal action to rt2jira
+                    internal_action = 'Comments added by ' + config.get('rt', 'username')
+                    new_comment = None
+                    if internal_action not in c['Description']:
+                        logger.info('Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
+                        syslog.syslog(syslog.LOG_INFO, 'Adding new comment to (' + jira_issue.key + ') from (' + comment_creator + ') on (' + rt_format_comment_time(comment_date) + ')')
+                        new_comment = jira.add_comment(jira_issue, truncated_comment)
     
                     user = find_user(comment_creator, config.getint('jira', 'find_user_algo_type_comment'), config.get('jira', 'find_user_projects'))
                     if user:
@@ -490,7 +504,7 @@ if __name__ == '__main__':
                     # Assign ticket, if a dupe RT ticket was created and current ticket is unassigned.
                     # The assumption here is that whoever has most recently repled to the RT ticket via email is likely the default assignee of the ticket.
                     fields_dict = config_get_dict(config, 'jira', 'create_fields')
-                    if fields_dict != {} and not jira_issue.fields.assignee:
+                    if fields_dict != {} and not jira_issue.fields.assignee and '@' not in c['Creator']:
                         for k,v in fields_dict.iteritems():
                             try:
                                 if 'ticket_id' in v and 'Ticket created by' in c['Description'] and eval('jira_issue.fields.' + k) != ticket_id:
@@ -524,11 +538,19 @@ if __name__ == '__main__':
                     if 'resolved' in c['Description']:
                         resolve(jira_issue, config.get('jira', 'resolve_resolution_name'), config.get('jira', 'resolve_comment'))
 
-                    # Once the JIRA ticket is created, should the security level be modified?
+                    # Once the JIRA ticket is commented, should a new label be assigned to the ticket? 
+                    new_comment_label = config.get('jira', 'new_comment_label')
+                    if new_comment_label != "None" and ('Correspondence' in c['Description'] or 'Ticket created' in c['Description']):
+                        logger.debug('Adding label (' + new_comment_label + ') to (' + jira_issue.key + ')')
+                        syslog.syslog(syslog.LOG_DEBUG, 'Adding label (' + new_comment_label + ') to (' + jira_issue.key + ')')
+                        jira_issue.fields.labels.append(new_comment_label)
+                        jira_issue.update(fields={"labels": jira_issue.fields.labels})
+
+                    # Once the JIRA ticket is commented, should the security level be modified?
                     if config.getboolean('jira', 'modify_security_level'):
                         original_security_level = config.get('jira', 'original_security_level')
                         original_security_level_mentioned = False
-                        if original_security_level != "None" and original_security_level in new_comment.body:
+                        if original_security_level != "None" and new_comment and original_security_level in new_comment.body:
                             original_security_level_mentioned = True
     
                         if original_security_level_mentioned:
