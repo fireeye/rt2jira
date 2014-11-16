@@ -327,8 +327,10 @@ if __name__ == '__main__':
     
                 # Check if JIRA ticket already exists.
                 jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
-            else:
-                # If the sanitized summary is empty, then search specifically for the Ticket ID reference in the JIRA ticket description.
+
+            # If the summary wasn't valid or we didn't get any previous search results.
+            if not sanitized_summary or not jira_results:
+                # Then search specifically for the Ticket ID reference in the JIRA ticket description.
                 description = 'Ticket ID: ' + ticket_id
 
                 # If the ticket_summary was completely empty, then create an artificial one.
