@@ -392,6 +392,14 @@ if __name__ == '__main__':
                     logger.warn('Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
                     syslog.syslog(syslog.LOG_WARNING, 'Unable to find equivalent RT requester in JIRA: ' + ticket_requester)
 
+                # If global watchers are specified, then add them to the newly created ticket.
+                create_watchers = config.get('jira', 'create_watchers')
+                if create_watchers != "None":
+                    for create_watcher in create_watchers.split(','):
+                        logger.debug('Adding (' + create_watcher + ') as a watcher to (' + jira_issue.key + ')')
+                        syslog.syslog(syslog.LOG_DEBUG, 'Adding (' + create_watcher + ') as a watcher to (' + jira_issue.key + ')')
+                        jira.add_watcher(jira_issue, create_watcher)
+                        
                 # Once the JIRA ticket is created, should a new label be assigned to the ticket? 
                 new_issue_label = config.get('jira', 'new_issue_label')
                 if new_issue_label != "None":
