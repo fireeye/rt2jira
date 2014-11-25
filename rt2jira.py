@@ -326,7 +326,7 @@ if __name__ == '__main__':
                 syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + sanitized_summary)
     
                 # Check if JIRA ticket already exists.
-                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC')
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND summary ~ "' + sanitized_summary + '" ORDER BY created ASC', maxResults=False)
 
             # If the summary wasn't valid or we didn't get any previous search results.
             if not sanitized_summary or not jira_results:
@@ -341,7 +341,7 @@ if __name__ == '__main__':
                 syslog.syslog(syslog.LOG_DEBUG, 'JQL Search Terms: ' + description)
     
                 # Check if JIRA ticket already exists.
-                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC')
+                jira_results = jira.search_issues('project = ' + config.get('jira', 'project') + ' AND component = "' + config.get('jira', 'component') + '" AND description ~ "' + description + '" ORDER BY created ASC', maxResults=False)
     
             # Check if at least one matching JIRA ticket exists.
             jira_issue = None
