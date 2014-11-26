@@ -74,7 +74,7 @@ try:
             continue
 
         logger.info('RT Ticket ID (' + ticket_id + ') - ' + jira_issue.fields.summary)
-        syslog.syslog(syslog.LOG_INFO, 'RT Ticket ID (' + ticket_id + ') - ' + jira_issue.fields.summary)
+        syslog.syslog(syslog.LOG_INFO, 'RT Ticket ID (' + ticket_id + ') - ' + re.sub('[^0-9A-Za-z\.\- ]', ' ', jira_issue.fields.summary))
 
         # Next, obtain all current comments on the JIRA ticket. 
         jira_comments = jira.comments(jira_issue)
