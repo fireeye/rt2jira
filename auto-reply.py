@@ -36,6 +36,9 @@ def format_search_results(jira_results):
     :param jira_results: the list of JIRA tickets to format
     """
     output = ""
+    if not jira_results:
+        return output
+
     for result in jira_results:
         template = '[%(issue_key)s] - %(issue_summary)s - [%(issue_status)s]\n%(jira_url_prefix)s/browse/%(issue_key)s\n'
         entry = template % {"jira_url_prefix": config.get('jira', 'jira_url_prefix'), "issue_key": result.key, "issue_summary": result.fields.summary, "issue_status": result.fields.status}
@@ -128,6 +131,12 @@ try:
             logger.error('Unable to find template issue specified: ' + config.get('jira', 'auto_reply_template_ticket'))
             syslog.syslog(syslog.LOG_ERR, 'Unable to find template issue specified: ' + config.get('jira', 'auto_reply_template_ticket'))
             sys.exit(1)
+
+        if not related_jira_query:
+            related_jira_query = ""
+
+        if not recent_jira_query:
+            recent_jira_query = ""
 
         reply_message = template_issue.fields.description % {"jira_url_prefix": config.get('jira', 'jira_url_prefix'), "issue_key": jira_issue.key, "issue_summary": jira_issue.fields.summary, "related_results": format_search_results(related_jira_results), "recent_results": format_search_results(recent_jira_results), "related_query": quote_plus(related_jira_query), "recent_query": quote_plus(recent_jira_query)}
 
